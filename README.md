@@ -131,7 +131,7 @@ If you encounter errors while installing the packages listed in requirements.txt
 Before training, you need to download the [UVG](https://ultravideo.fi/dataset.html). 
 
 ### Manual Training Example
-This repository provides scripts for video representation and compression using Gaussian models. The workflow involves two key steps:
+This repository provides scripts for video representation and compression (Encode and Decode) using Gaussian models. The workflow involves two key steps:
 
 1. **Video Representation:** Overfit a video using Gaussian splatting to obtain a detailed model.
 2. **Video Compression:** Compress the overfitted model to reduce file size while maintaining quality.
@@ -156,7 +156,8 @@ python train_video_overfitting.py \
 ```
 
 #### Step 2: Video Compression
-Run `train_video_encoder_.py` to compress the video using the overfitted model:
+Encode: 
+Run `train_video_encoder_.py` to compress the video using the overfitted model.
 
 ```bash
 python train_PGSVC_encoder_newIP.py \
@@ -171,9 +172,8 @@ python train_PGSVC_encoder_newIP.py \
 --savdir_m PGSVC_encode_model \
 --save_video
 ```
-
-#### Inference: Decode
-Run `test_PGSVC_decoder.py` to decode the compressed Gaussian video:
+Decode: 
+Run `test_PGSVC_decoder.py` to decode the compressed Gaussian video.
 ```bash
 python test_PGSVC_decoder.py \
  --model_path /home/Progressive_GS/checkpoints/PGSVC_encode_model/Beauty/PrGS_50000_12000_3/encoded_gmodels_state_dict.pth \
