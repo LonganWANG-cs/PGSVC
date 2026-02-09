@@ -137,10 +137,10 @@ This repository provides scripts for video representation and compression (Encod
 2. **Video Compression:** Compress the overfitted model to reduce file size while maintaining quality.
 
 #### Step 1: Video Representation
-Run `train_video_overfitting.py` to generate the overfitted model:
+Run `train_PGSVC_overfitting.py` to generate the overfitted model:
 
 ```bash
-python train_video_overfitting.py \
+python train_PGSVC_overfitting.py \
   --dataset /home/data/UVG/Beauty/Beauty_1920x1080_120fps_420_8bit_YUV.yuv \
   --data_name Beauty \
   --num_points 12000 \
@@ -157,7 +157,7 @@ python train_video_overfitting.py \
 
 #### Step 2: Video Compression
 Encode: 
-Run `train_video_encoder.py` to compress the video using the overfitted model.
+Run `train_PGSVC_encoder.py` to compress the video using the overfitted model.
 
 ```bash
 python train_PGSVC_encoder.py \
