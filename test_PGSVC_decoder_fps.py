@@ -50,7 +50,7 @@ class SimpleTrainer2d:
             self.logwriter = LogWriter(self.result_save_path)
 
         if quantized_model is not None:
-            t_decode_start = time.perf_counter()
+            t_decode_start = time.time()
 
         if previous_model is not None and quantized_model is not None:
             self.gaussian_model = GaussianSplats_delta(
@@ -225,7 +225,7 @@ class SimpleTrainer2d:
                 self.gaussian_model._features_dc_layers[i] = feat
 
         if quantized_model is not None:
-            self.decode_time_s = time.perf_counter() - t_decode_start
+            self.decode_time_s = time.time() - t_decode_start
 
     def render(self):         
         psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel, render_fps = self.test()
