@@ -157,11 +157,11 @@ python train_video_overfitting.py \
 
 #### Step 2: Video Compression
 Encode: 
-Run `train_video_encoder_.py` to compress the video using the overfitted model.
+Run `train_video_encoder.py` to compress the video using the overfitted model.
 
 ```bash
-python train_PGSVC_encoder_newIP.py \
- --model_path /home/Progressive_GS/checkpoints/PGSVC_overfit_model/Beauty/PrGS_50000_12000_3/gmodels_state_dict.pth \
+python train_PGSVC_encoder.py \
+ --model_path /home/PGSVC/checkpoints/PGSVC_overfit_model/Beauty/PrGS_50000_12000_3/gmodels_state_dict.pth \
  --num_points 12000 \
 --dataset /home/data/UVG/Beauty/Beauty_1920x1080_120fps_420_8bit_YUV.yuv \
 --data_name Beauty\
@@ -176,7 +176,7 @@ Decode:
 Run `test_PGSVC_decoder.py` to decode the compressed Gaussian video.
 ```bash
 python test_PGSVC_decoder.py \
- --model_path /home/Progressive_GS/checkpoints/PGSVC_encode_model/Beauty/PrGS_50000_12000_3/encoded_gmodels_state_dict.pth \
+ --model_path /home/PGSVC/checkpoints/PGSVC_encode_model/Beauty/PrGS_50000_12000_3/encoded_gmodels_state_dict.pth \
  --num_points 12000 \
 --dataset /home/data/UVG/Beauty/Beauty_1920x1080_120fps_420_8bit_YUV.yuv \
 --data_name Beauty\
