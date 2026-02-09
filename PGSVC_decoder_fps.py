@@ -8,6 +8,7 @@ from quantize import *
 import math
 from optimizer import Adan
 from pytorch_msssim import ms_ssim
+import time
 
 
 class GaussianSplats(nn.Module):
@@ -120,7 +121,7 @@ class GaussianSplats(nn.Module):
             rendered_images.append(ds_rendered_image)
             psnr_list.append(psnr)
             ms_ssim_list.append(ms_ssim_value)
-        return rendered_images, psnr_list, ms_ssim_list
+        return rendered_images, psnr_list, ms_ssim_list, render_fps
     
 
     
@@ -271,6 +272,19 @@ class GaussianSplats_delta(nn.Module):
     
 
     def render(self,gt_images):
+        repeat = 100
+        num_layers = min(3, self.layer_number)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        for _ in range(repeat):
+            for idx in range(num_layers):
+                _ = self.forward_layer(idx)["render"]
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        dt = time.perf_counter() - t0
+        render_fps = (repeat / dt) if dt > 0 else 0.0
+
         rendered_images = []
         psnr_list = []
         ms_ssim_list = []
@@ -289,7 +303,7 @@ class GaussianSplats_delta(nn.Module):
             rendered_images.append(ds_rendered_image)
             psnr_list.append(psnr)
             ms_ssim_list.append(ms_ssim_value)
-        return rendered_images, psnr_list, ms_ssim_list
+        return rendered_images, psnr_list, ms_ssim_list,render_fps
     
 
 

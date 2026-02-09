@@ -38,6 +38,12 @@ class SimpleTrainer2d:
         self.previous_model=previous_model
         self.quantized_model=quantized_model
         self.add_num_Gaussians=0
+
+        self.decode_time_s = 0.0
+
+        def _sync_cuda():
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
         for s in self.scaling_factor:
             # downsampled = torch.nn.functional.interpolate(self.gt_image, scale_factor=s, mode='area')
             # resized_back = torch.nn.functional.interpolate(downsampled, size=(self.H, self.W), mode='bilinear', align_corners=False)
@@ -46,6 +52,11 @@ class SimpleTrainer2d:
         self.result_save_path = Path(result_save_path) / str(self.frame_num)
         if self.save_imgs:
             self.logwriter = LogWriter(self.result_save_path)
+
+        if quantized_model is not None:
+            _sync_cuda()
+            t_decode_start = time.perf_counter()
+
         if previous_model is not None and quantized_model is not None:
             self.gaussian_model = GaussianSplats_delta(
                 num_points_per_layer = self.num_points_per_layer,
@@ -218,14 +229,18 @@ class SimpleTrainer2d:
                 self.gaussian_model._cholesky_layers[i] = ch
                 self.gaussian_model._features_dc_layers[i] = feat
 
+        if quantized_model is not None:
+            _sync_cuda()
+            self.decode_time_s = time.perf_counter() - t_decode_start
+
     def render(self):         
-        psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel = self.test()
-        return psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel
+        psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel, render_fps = self.test()
+        return psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel, render_fps
 
     def test(self):
         self.gaussian_model.eval()
         with torch.no_grad():
-            rendered_images, psnr_list, ms_ssim_list = self.gaussian_model.render(self.gt_images)
+            rendered_images, psnr_list, ms_ssim_list, render_fps = self.gaussian_model.render(self.gt_images)
             transform = transforms.ToPILImage()
             transformed_rendered_images = []
             if self.save_imgs:
@@ -272,7 +287,7 @@ class SimpleTrainer2d:
                 }
 
  
-            return psnr_list, ms_ssim_list, transformed_rendered_images, decoded_Gmodel
+            return psnr_list, ms_ssim_list, transformed_rendered_images, decoded_Gmodel, render_fps
         
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
@@ -307,6 +322,7 @@ def main(argv):
     psnr_list = []
     msssim_list = []
     frames = []
+    fps_list = []
     args = parse_args(argv)
     if args.seed is not None:
         torch.manual_seed(args.seed)
@@ -388,6 +404,9 @@ def main(argv):
 
     rendered_images_list = []
     P_Gmodel=None
+
+    total_decode_time_s = 0.0
+    decoded_frames = 0
   
     for i in range(start, start + frame_length):
         frame_num=i+1
@@ -441,8 +460,13 @@ def main(argv):
                         args=args
                     )
         
-        psnr, ms_ssim, rendered_images, decoded_Gmodel = render.render()
+        psnr, ms_ssim, rendered_images, decoded_Gmodel, render_fps = render.render()
         P_Gmodel = decoded_Gmodel
+        total_decode_time_s += float(getattr(render, 'decode_time_s', 0.0))
+        decoded_frames += 1
+        fps_list.append(float(render_fps))
+        logwriter.write(f"{frame_num}: RenderFPS:{float(render_fps):.3f}")
+        logwriter.write(f"{frame_num}: DecodeTime:{float(getattr(render, 'decode_time_s', 0.0)):.6f}s")
         for idx in range(0,layer_number):
             logwriter.write("{}: Layer{}_Image: {}x{}, PSNR:{:.4f}, MS-SSIM:{:.4f}".format(
                 frame_num, idx+1, render.W, render.H, psnr[idx], ms_ssim[idx]))
@@ -457,6 +481,13 @@ def main(argv):
     msssim_list.append(avg_msssim)
     print("=== Progressive Decoding Done ===")
     print(f"Average PSNR: {avg_psnr:.4f}, Average MS-SSIM: {avg_msssim:.6f}")
+    avg_fps = sum(fps_list) / len(fps_list) if len(fps_list) > 0 else 0.0
+    logwriter.write(f"Average RenderFPS:{avg_fps:.3f}")
+    print(f"Average RenderFPS:{avg_fps:.3f}")
+
+    decode_fps = (decoded_frames / total_decode_time_s) if total_decode_time_s > 0 else 0.0
+    logwriter.write(f"Average DecodeFPS:{decode_fps:.3f} (frames={decoded_frames}, time={total_decode_time_s:.6f}s)")
+    print(f"Average DecodeFPS:{decode_fps:.3f} (frames={decoded_frames}, time={total_decode_time_s:.6f}s)")
     if args.save_video:
         generate_progressive_video(result_save_path, rendered_images_list,"rendered_video.mp4")
 
