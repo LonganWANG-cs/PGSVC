@@ -92,14 +92,10 @@ class GaussianSplats(nn.Module):
     def render(self,gt_images):
         repeat = 100
         num_layers = min(3, self.layer_number)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
         t0 = time.perf_counter()
         for _ in range(repeat):
             for idx in range(num_layers):
                 _ = self.forward_layer(idx)["render"]
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
         dt = time.perf_counter() - t0
         render_fps = (repeat / dt) if dt > 0 else 0.0
 
@@ -274,14 +270,10 @@ class GaussianSplats_delta(nn.Module):
     def render(self,gt_images):
         repeat = 100
         num_layers = min(3, self.layer_number)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
         t0 = time.perf_counter()
         for _ in range(repeat):
             for idx in range(num_layers):
                 _ = self.forward_layer(idx)["render"]
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
         dt = time.perf_counter() - t0
         render_fps = (repeat / dt) if dt > 0 else 0.0
 

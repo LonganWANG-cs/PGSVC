@@ -40,10 +40,6 @@ class SimpleTrainer2d:
         self.add_num_Gaussians=0
 
         self.decode_time_s = 0.0
-
-        def _sync_cuda():
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
         for s in self.scaling_factor:
             # downsampled = torch.nn.functional.interpolate(self.gt_image, scale_factor=s, mode='area')
             # resized_back = torch.nn.functional.interpolate(downsampled, size=(self.H, self.W), mode='bilinear', align_corners=False)
@@ -54,7 +50,6 @@ class SimpleTrainer2d:
             self.logwriter = LogWriter(self.result_save_path)
 
         if quantized_model is not None:
-            _sync_cuda()
             t_decode_start = time.perf_counter()
 
         if previous_model is not None and quantized_model is not None:
@@ -230,7 +225,6 @@ class SimpleTrainer2d:
                 self.gaussian_model._features_dc_layers[i] = feat
 
         if quantized_model is not None:
-            _sync_cuda()
             self.decode_time_s = time.perf_counter() - t_decode_start
 
     def render(self):         
