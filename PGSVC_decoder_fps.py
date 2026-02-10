@@ -88,21 +88,7 @@ class GaussianSplats(nn.Module):
         out_img = out_img.view(-1, self.H, self.W, 3).permute(0, 3, 1, 2).contiguous()
         return {"render": out_img}
 
-    def forward(self):
-        idx = self.layer_number - 1
-        return self.forward_layer(idx)["render"]
-
-    
     def render(self,gt_images):
-        repeat = 100
-        with torch.no_grad():
-            self.eval()
-            test_start_time = time.time()
-            for _ in range(repeat):
-                _ = self()
-            avg_time = (time.time() - test_start_time) / repeat
-        render_fps = (1.0 / avg_time) if avg_time > 0 else 0.0
-
         rendered_images = []
         psnr_list = []
         ms_ssim_list = []
@@ -121,7 +107,7 @@ class GaussianSplats(nn.Module):
             rendered_images.append(ds_rendered_image)
             psnr_list.append(psnr)
             ms_ssim_list.append(ms_ssim_value)
-        return rendered_images, psnr_list, ms_ssim_list, render_fps
+        return rendered_images, psnr_list, ms_ssim_list
     
 
     
@@ -270,21 +256,9 @@ class GaussianSplats_delta(nn.Module):
         out_img = out_img.view(-1, self.H, self.W, 3).permute(0, 3, 1, 2).contiguous()
         return {"render": out_img}
 
-    def forward(self):
-        idx = self.layer_number - 1
-        return self.forward_layer(idx)["render"]
-    
+
 
     def render(self,gt_images):
-        repeat = 100
-        with torch.no_grad():
-            self.eval()
-            test_start_time = time.time()
-            for _ in range(repeat):
-                _ = self()
-            avg_time = (time.time() - test_start_time) / repeat
-        render_fps = (1.0 / avg_time) if avg_time > 0 else 0.0
-
         rendered_images = []
         psnr_list = []
         ms_ssim_list = []
@@ -303,7 +277,7 @@ class GaussianSplats_delta(nn.Module):
             rendered_images.append(ds_rendered_image)
             psnr_list.append(psnr)
             ms_ssim_list.append(ms_ssim_value)
-        return rendered_images, psnr_list, ms_ssim_list,render_fps
+        return rendered_images, psnr_list, ms_ssim_list
     
 
 

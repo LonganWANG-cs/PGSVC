@@ -38,7 +38,7 @@ class SimpleTrainer2d:
         self.previous_model=previous_model
         self.quantized_model=quantized_model
         self.add_num_Gaussians=0
-
+        self.layer_number =  len(self.num_points_per_layer)
         self.decode_time_s = 0.0
         for s in self.scaling_factor:
             # downsampled = torch.nn.functional.interpolate(self.gt_image, scale_factor=s, mode='area')
@@ -227,14 +227,20 @@ class SimpleTrainer2d:
         if quantized_model is not None:
             self.decode_time_s = time.time() - t_decode_start
 
-    def render(self):         
+    def render(self):
         psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel, render_fps = self.test()
-        return psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel, render_fps
+        with torch.no_grad():
+            self.gaussian_model.eval()
+            test_start_time = time.time()
+            for i in range(100):
+                _ = self.gaussian_model.forward_layer(self.layer_number-1)
+            test_end_time = (time.time() - test_start_time)/100
+        return psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel, 1/test_end_time
 
     def test(self):
         self.gaussian_model.eval()
         with torch.no_grad():
-            rendered_images, psnr_list, ms_ssim_list, render_fps = self.gaussian_model.render(self.gt_images)
+            rendered_images, psnr_list, ms_ssim_list = self.gaussian_model.render(self.gt_images)
             transform = transforms.ToPILImage()
             transformed_rendered_images = []
             if self.save_imgs:
@@ -281,7 +287,7 @@ class SimpleTrainer2d:
                 }
 
  
-            return psnr_list, ms_ssim_list, transformed_rendered_images, decoded_Gmodel, render_fps
+            return psnr_list, ms_ssim_list, transformed_rendered_images, decoded_Gmodel
         
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
