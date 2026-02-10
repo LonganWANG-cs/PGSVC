@@ -228,7 +228,7 @@ class SimpleTrainer2d:
             self.decode_time_s = time.time() - t_decode_start
 
     def render(self):
-        psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel, render_fps = self.test()
+        psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel = self.test()
         with torch.no_grad():
             self.gaussian_model.eval()
             test_start_time = time.time()
