@@ -49,9 +49,6 @@ class SimpleTrainer2d:
         if self.save_imgs:
             self.logwriter = LogWriter(self.result_save_path)
 
-        if quantized_model is not None:
-            t_decode_start = time.time()
-
         if previous_model is not None and quantized_model is not None:
             self.gaussian_model = GaussianSplats_delta(
                 num_points_per_layer = self.num_points_per_layer,
@@ -102,6 +99,7 @@ class SimpleTrainer2d:
                 # decode current layer quantized parameters to tensors
                 layer_ckpt = checkpoint[i]
                 device = self.device
+                t_decode_layer_start = time.time()
                 if add_num > 0:
                     num_delta_Gaussians = cur_len - add_num
                     xyz_front = self.gaussian_model.xyz_quantizers[i].decode(layer_ckpt['xyz_front'].to(device))
@@ -128,6 +126,7 @@ class SimpleTrainer2d:
                     feat_idx = layer_ckpt['features_index'].to(device).long()
                     cur_ch_full = self.gaussian_model.cholesky_quantizers[i].decompress(q_ch)
                     cur_feat_full = self.gaussian_model.features_dc_quantizers[i].decompress(feat_idx)
+                self.decode_time_s += (time.time() - t_decode_layer_start)
 
                 # Build aligned tensors: current params in order, previous-frame params matched by point_id (zeros for new)
                 def _align_cur_prev(cur_tensor: torch.Tensor, prev_tensor: torch.Tensor):
@@ -216,16 +215,15 @@ class SimpleTrainer2d:
                 xyz = layer_ckpt['xyz'].to(self.device).float()
                 q_ch = layer_ckpt['cholesky'].to(self.device).float()
                 feat_idx = layer_ckpt['features_index'].to(self.device).long()
+                t_decode_layer_start = time.time()
                 ch = self.gaussian_model.cholesky_quantizers[i].decompress(q_ch)
                 feat = self.gaussian_model.features_dc_quantizers[i].decompress(feat_idx)
+                self.decode_time_s += (time.time() - t_decode_layer_start)
 
                 # overwrite registered buffers (these are plain tensors in PGSVC_decoder.GaussianSplats)
                 self.gaussian_model._xyz_layers[i] = xyz
                 self.gaussian_model._cholesky_layers[i] = ch
                 self.gaussian_model._features_dc_layers[i] = feat
-
-        if quantized_model is not None:
-            self.decode_time_s = time.time() - t_decode_start
 
     def render(self):
         psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel = self.test()
