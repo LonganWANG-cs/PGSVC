@@ -38,6 +38,8 @@ class SimpleTrainer2d:
         self.previous_model=previous_model
         self.quantized_model=quantized_model
         self.add_num_Gaussians=0
+        self.layer_number =  len(self.num_points_per_layer)
+        self.decode_time_s = 0.0
         for s in self.scaling_factor:
             # downsampled = torch.nn.functional.interpolate(self.gt_image, scale_factor=s, mode='area')
             # resized_back = torch.nn.functional.interpolate(downsampled, size=(self.H, self.W), mode='bilinear', align_corners=False)
@@ -46,6 +48,7 @@ class SimpleTrainer2d:
         self.result_save_path = Path(result_save_path) / str(self.frame_num)
         if self.save_imgs:
             self.logwriter = LogWriter(self.result_save_path)
+
         if previous_model is not None and quantized_model is not None:
             self.gaussian_model = GaussianSplats_delta(
                 num_points_per_layer = self.num_points_per_layer,
@@ -96,6 +99,7 @@ class SimpleTrainer2d:
                 # decode current layer quantized parameters to tensors
                 layer_ckpt = checkpoint[i]
                 device = self.device
+                t_decode_layer_start = time.time()
                 if add_num > 0:
                     num_delta_Gaussians = cur_len - add_num
                     xyz_front = self.gaussian_model.xyz_quantizers[i].decode(layer_ckpt['xyz_front'].to(device))
@@ -122,6 +126,7 @@ class SimpleTrainer2d:
                     feat_idx = layer_ckpt['features_index'].to(device).long()
                     cur_ch_full = self.gaussian_model.cholesky_quantizers[i].decompress(q_ch)
                     cur_feat_full = self.gaussian_model.features_dc_quantizers[i].decompress(feat_idx)
+                self.decode_time_s += (time.time() - t_decode_layer_start)
 
                 # Build aligned tensors: current params in order, previous-frame params matched by point_id (zeros for new)
                 def _align_cur_prev(cur_tensor: torch.Tensor, prev_tensor: torch.Tensor):
@@ -210,17 +215,25 @@ class SimpleTrainer2d:
                 xyz = layer_ckpt['xyz'].to(self.device).float()
                 q_ch = layer_ckpt['cholesky'].to(self.device).float()
                 feat_idx = layer_ckpt['features_index'].to(self.device).long()
+                t_decode_layer_start = time.time()
                 ch = self.gaussian_model.cholesky_quantizers[i].decompress(q_ch)
                 feat = self.gaussian_model.features_dc_quantizers[i].decompress(feat_idx)
+                self.decode_time_s += (time.time() - t_decode_layer_start)
 
                 # overwrite registered buffers (these are plain tensors in PGSVC_decoder.GaussianSplats)
                 self.gaussian_model._xyz_layers[i] = xyz
                 self.gaussian_model._cholesky_layers[i] = ch
                 self.gaussian_model._features_dc_layers[i] = feat
 
-    def render(self):         
+    def render(self):
         psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel = self.test()
-        return psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel
+        with torch.no_grad():
+            self.gaussian_model.eval()
+            test_start_time = time.time()
+            for i in range(100):
+                _ = self.gaussian_model.forward_layer(self.layer_number-1)
+            test_end_time = (time.time() - test_start_time)/100
+        return psnr_value, ms_ssim_value, rendered_images, decoded_Gmodel, 1/test_end_time
 
     def test(self):
         self.gaussian_model.eval()
@@ -307,6 +320,7 @@ def main(argv):
     psnr_list = []
     msssim_list = []
     frames = []
+    fps_list = []
     args = parse_args(argv)
     if args.seed is not None:
         torch.manual_seed(args.seed)
@@ -388,6 +402,9 @@ def main(argv):
 
     rendered_images_list = []
     P_Gmodel=None
+
+    total_decode_time_s = 0.0
+    decoded_frames = 0
   
     for i in range(start, start + frame_length):
         frame_num=i+1
@@ -441,8 +458,13 @@ def main(argv):
                         args=args
                     )
         
-        psnr, ms_ssim, rendered_images, decoded_Gmodel = render.render()
+        psnr, ms_ssim, rendered_images, decoded_Gmodel, render_fps = render.render()
         P_Gmodel = decoded_Gmodel
+        total_decode_time_s += float(getattr(render, 'decode_time_s', 0.0))
+        decoded_frames += 1
+        fps_list.append(float(render_fps))
+        logwriter.write(f"{frame_num}: RenderFPS:{float(render_fps):.3f}")
+        logwriter.write(f"{frame_num}: DecodeTime:{float(getattr(render, 'decode_time_s', 0.0)):.6f}s")
         for idx in range(0,layer_number):
             logwriter.write("{}: Layer{}_Image: {}x{}, PSNR:{:.4f}, MS-SSIM:{:.4f}".format(
                 frame_num, idx+1, render.W, render.H, psnr[idx], ms_ssim[idx]))
@@ -457,6 +479,13 @@ def main(argv):
     msssim_list.append(avg_msssim)
     print("=== Progressive Decoding Done ===")
     print(f"Average PSNR: {avg_psnr:.4f}, Average MS-SSIM: {avg_msssim:.6f}")
+    avg_fps = sum(fps_list) / len(fps_list) if len(fps_list) > 0 else 0.0
+    logwriter.write(f"Average RenderFPS:{avg_fps:.3f}")
+    print(f"Average RenderFPS:{avg_fps:.3f}")
+
+    decode_fps = (decoded_frames / total_decode_time_s) if total_decode_time_s > 0 else 0.0
+    logwriter.write(f"Average DecodeFPS:{decode_fps:.3f} (frames={decoded_frames}, time={total_decode_time_s:.6f}s)")
+    print(f"Average DecodeFPS:{decode_fps:.3f} (frames={decoded_frames}, time={total_decode_time_s:.6f}s)")
     if args.save_video:
         generate_progressive_video(result_save_path, rendered_images_list,"rendered_video.mp4")
 

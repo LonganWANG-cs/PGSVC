@@ -8,6 +8,7 @@ from quantize import *
 import math
 from optimizer import Adan
 from pytorch_msssim import ms_ssim
+import time
 
 
 class GaussianSplats(nn.Module):
@@ -87,7 +88,6 @@ class GaussianSplats(nn.Module):
         out_img = out_img.view(-1, self.H, self.W, 3).permute(0, 3, 1, 2).contiguous()
         return {"render": out_img}
 
-    
     def render(self,gt_images):
         rendered_images = []
         psnr_list = []
@@ -255,7 +255,8 @@ class GaussianSplats_delta(nn.Module):
         )
         out_img = out_img.view(-1, self.H, self.W, 3).permute(0, 3, 1, 2).contiguous()
         return {"render": out_img}
-    
+
+
 
     def render(self,gt_images):
         rendered_images = []
