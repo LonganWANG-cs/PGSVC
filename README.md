@@ -1,11 +1,11 @@
 # P-GSVC: Layered Progressive 2D Gaussian Splatting for Scalable Image and Video
 <!-- [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)  -->
-[![arXiv](https://img.shields.io/badge/PGSVC-XXXX.XXXX-red
-)](https://arxiv.org/abs/XXXX.XXXX)
+[![arXiv](https://img.shields.io/badge/PGSVC-2603.1055-red
+)](https://arxiv.org/html/2603.10551v1)
 [![GitHub Repo stars](https://img.shields.io/github/stars/LonganWANG-cs/PGSVC?style=social&label=Star
 )](https://github.com/LonganWANG-cs/PGSVC)
 
-[[paper](https://arxiv.org/abs/XXXX.XXXX)][[project page](https://longanwang-cs.github.io/PGSVC-webpage/)]
+[[paper](https://arxiv.org/html/2603.10551v1)][[project page](https://longanwang-cs.github.io/PGSVC-webpage/)]
 [[code](https://github.com/LonganWANG-cs/PGSVC)]
 
 [Longan Wang](https://longanwang-cs.github.io/), [Yuang Shi](https://yuang-ian.github.io/), [Wei Tsang Ooi📧](https://www.comp.nus.edu.sg/~ooiwt/)
