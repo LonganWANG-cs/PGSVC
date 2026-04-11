@@ -2,8 +2,7 @@
 <!-- [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)  -->
 [![arXiv](https://img.shields.io/badge/PGSVC-2603.1055-red
 )](https://arxiv.org/html/2603.10551v1)
-[![GitHub Repo stars](https://img.shields.io/github/stars/LonganWANG-cs/PGSVC?style=social&label=Star
-)](https://github.com/LonganWANG-cs/PGSVC)
+
 
 [[paper](https://arxiv.org/html/2603.10551v1)][[project page](https://longanwang-cs.github.io/PGSVC-webpage/)]
 [[code](https://github.com/LonganWANG-cs/PGSVC)]
