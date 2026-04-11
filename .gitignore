@@ -6,3 +6,4 @@ output/
 loadmodal/
 Web/
 checkpoints_quant/
+sh_test.sh
