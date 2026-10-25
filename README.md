@@ -80,7 +80,7 @@ Extensive experiments on both image and video datasets demonstrate that P-GSVC a
 
 ## News
 
-* **2025/2/1**: 🔥 We release our Python and CUDA code for GSVC presented in our paper. Have a try!
+* **2026/1/14**: 🔥 We release our Python and CUDA code for P-GSVC presented in our paper. Have a try!
 
 <!-- * **2025/2/1**: 🌟 Our paper has been accepted by NOSSDAV 2025! 🎉 Cheers! -->
 
