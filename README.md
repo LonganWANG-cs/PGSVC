@@ -4,7 +4,7 @@
 )](https://arxiv.org/html/2603.10551v1)
 
 
-[[paper](https://dl-acm-org.libproxy1.nus.edu.sg/doi/10.1145/3793853.3795755)][[project page](https://longanwang-cs.github.io/PGSVC-webpage/)]
+[[paper](https://dl-acm-org.libproxy1.nus.edu.sg/doi/10.1145/3793853.3795755)][[project page](https://longanwang-cs.github.io/pgsvc/)]
 [[code](https://github.com/LonganWANG-cs/PGSVC)]
 
 [Longan Wang](https://longanwang-cs.github.io/), [Yuang Shi](https://yuang-ian.github.io/), [Wei Tsang Ooi📧](https://www.comp.nus.edu.sg/~ooiwt/)
