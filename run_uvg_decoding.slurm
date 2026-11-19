@@ -38,9 +38,23 @@ conda activate "${PGSVC_ENV:-pGS}"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export PYTHONUNBUFFERED=1
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.5}"
+export PATH="$CUDA_HOME/bin:$PATH"
+export TORCH_CUDA_ARCH_LIST=9.0
+export MAX_JOBS=2
+export PYTHONPATH="$PWD/gsplat${PYTHONPATH:+:$PYTHONPATH}"
+export TORCH_EXTENSIONS_DIR="$PWD/checkpoints/.gsplat-h100-$(git rev-parse --short HEAD:gsplat)"
+mkdir -p "$TORCH_EXTENSIONS_DIR"
 
 echo "Revision $(git rev-parse HEAD) | $sequence | $frame_count frames | $iterations iterations per stage"
 nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+# Use the extension from this repository. Serialize first-time builds across array tasks.
+flock "$TORCH_EXTENSIONS_DIR/build.lock" python -c '
+import gsplat
+from gsplat.cuda import _backend
+assert _backend._C is not None, "Could not load the repository CUDA extension"
+print("gsplat:", gsplat.__file__, _backend._C.__file__)
+'
 
 model_dir="PrGS_${iterations}_12000_2"
 fitted="checkpoints/$run_name/overfit_model/$sequence/$model_dir/gmodels_state_dict.pth"
