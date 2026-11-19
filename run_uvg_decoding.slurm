@@ -14,6 +14,7 @@ cd "${SLURM_SUBMIT_DIR:?Submit from the PGSVC checkout}"
 run_name=${1:?Pass a run name for the checkpoint directories}
 frame_limit=${2:-0}
 iterations=${3:-5000}
+fitted_run=${4:-$run_name}
 sequence_names=(Beauty Bosphorus HoneyBee Jockey ReadySetGo ShakeNDry YachtRide)
 sequence=${sequence_names[${SLURM_ARRAY_TASK_ID:?Submit as a Slurm array}]}
 file_stem=$sequence
@@ -38,7 +39,7 @@ conda activate "${PGSVC_ENV:-pGS}"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export PYTHONUNBUFFERED=1
-export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.5}"
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.9}"
 export PATH="$CUDA_HOME/bin:$PATH"
 export TORCH_CUDA_ARCH_LIST=9.0
 export MAX_JOBS=2
@@ -57,9 +58,9 @@ print("gsplat:", gsplat.__file__, _backend._C.__file__)
 '
 
 model_dir="PrGS_${iterations}_12000_2"
-fitted="checkpoints/$run_name/overfit_model/$sequence/$model_dir/gmodels_state_dict.pth"
+fitted="checkpoints/$fitted_run/overfit_model/$sequence/$model_dir/gmodels_state_dict.pth"
 encoded="checkpoints/$run_name/encoded_model/$sequence/$model_dir/encoded_gmodels_state_dict.pth"
-key_frames="checkpoints/$run_name/overfit_result/$sequence/$model_dir/K_frames.txt"
+key_frames="checkpoints/$fitted_run/overfit_result/$sequence/$model_dir/K_frames.txt"
 timings="checkpoints/$run_name/decoder_result/$sequence/$model_dir/decode_per_frame.csv"
 common=(
     --dataset "$dataset" --data_name "$sequence" --width 1920 --height 1080
@@ -67,14 +68,18 @@ common=(
     --layer_number 2 --iterations "$iterations" --training_strategy sequential --is_downsample
 )
 
-echo "Stage 1: overfit"
-python train_PGSVC_overfitting.py "${common[@]}" --single_pass --is_GSP --is_GSA \
-    --savdir "$run_name/overfit_result" --savdir_m "$run_name/overfit_model"
+if [[ $fitted_run == "$run_name" ]]; then
+    echo "Stage 1: overfit"
+    python train_PGSVC_overfitting.py "${common[@]}" --single_pass --is_GSP --is_GSA \
+        --savdir "$run_name/overfit_result" --savdir_m "$run_name/overfit_model"
+else
+    echo "Stage 1: reuse $fitted"
+fi
 test -s "$fitted"
 
-echo "Stage 2: quantize and entropy-code"
+echo "Stage 2: quantize"
 python train_PGSVC_encoder.py "${common[@]}" --model_path "$fitted" \
-    --entropy_coding --key_frames "$key_frames" \
+    --skip_entropy_estimation --key_frames "$key_frames" \
     --savdir "$run_name/encoder_result" --savdir_m "$run_name/encoded_model"
 test -s "$encoded"
 

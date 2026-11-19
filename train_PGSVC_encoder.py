@@ -11,7 +11,7 @@ import torchvision.transforms as transforms
 import torch.nn as nn
 from PGSVC_encoder import GaussianSplats, GaussianSplats_delta
 import copy
-from quantize import pack_quantized_indices
+from quantize import UniformQuantizer, VectorQuantizer
 class SimpleTrainer2d:
     """Trains random 2d gaussians to fit an image."""
     def __init__(
@@ -43,7 +43,7 @@ class SimpleTrainer2d:
         self.overfitted_model=overfitted_model
         self.current_point_ids_layers = None
         self.point_id_order = []
-        self.entropy_coding = args.entropy_coding
+        self.measure_bpp = not args.skip_entropy_estimation
         for s in self.scaling_factor:
             # downsampled = torch.nn.functional.interpolate(self.gt_image, scale_factor=s, mode='area')
             # resized_back = torch.nn.functional.interpolate(downsampled, size=(self.H, self.W), mode='bilinear', align_corners=False)
@@ -138,6 +138,11 @@ class SimpleTrainer2d:
                 self.gaussian_model._features_dc_layers[i] = nn.Parameter(features_dc_layers[i].to(self.device))
             self.gaussian_model.update_optimizer()
 
+        if not self.measure_bpp:
+            for module in self.gaussian_model.modules():
+                if isinstance(module, (UniformQuantizer, VectorQuantizer)):
+                    module.measure_bits = False
+
     def train(self): 
         img_list=[]
         progress_bar = tqdm(range(1, int(self.iterations)+1), desc="Training progress")
@@ -189,19 +194,15 @@ class SimpleTrainer2d:
                         transformed_rendered_images_gs.append(transform(rendered_images_gs[idx].squeeze(0)))
                 else:
                     transformed_rendered_images_gs = transformed_rendered_images
-            num_layers = len(self.num_points_per_layer)
-            bits_list = self.gaussian_model.record_bits_up_to(num_layers)  # 每层 total_bit
-            print(f"Bits per layer: {bits_list}")
-            bits_list_cumsum = np.cumsum(bits_list).tolist()
-            print(f"bits_list_cumsum: {bits_list_cumsum}")
-            denom_per_layer = [
-                img.size[0] * img.size[1] for img in transformed_rendered_images
-            ]
-            print(f"denom_per_layer: {denom_per_layer}")
-            bpp = [
-                bits_list_cumsum[i] / max(1, denom_per_layer[i]) for i in range(num_layers)
-            ]
-            decoded_Gmodel = {}
+            bpp = None
+            if self.measure_bpp:
+                bits_list = self.gaussian_model.record_bits_up_to(len(self.num_points_per_layer))
+                print(f"Bits per layer: {bits_list}")
+                bpp = [
+                    bits / (img.width * img.height)
+                    for bits, img in zip(np.cumsum(bits_list), transformed_rendered_images)
+                ]
+
             means_list, cholesky_list, colors_list = self.gaussian_model.get_dequantized_Gaussians()
             decoded_Gmodel = {
                 '_xyz_layers': [p.detach().cpu() for p in means_list],
@@ -211,10 +212,6 @@ class SimpleTrainer2d:
 
             # quantized representation (encoded Gaussians + quantizer params)
             encoded_layers, quantizers_state = self.gaussian_model.get_quantized_Model()
-            if self.entropy_coding:
-                for layer in encoded_layers:
-                    for field in ("cholesky", "features_index"):
-                        layer[field] = pack_quantized_indices(layer[field])
             encoded_Gmodel = {
                 'encoded_layers': encoded_layers,
                 'quantizers_state': quantizers_state,
@@ -255,7 +252,7 @@ def parse_args(argv):
     parser.add_argument("--video_length", type=int, default=24, help="number of images to train in the dataset (default: %(default)s)") 
     parser.add_argument("--width", type=int, default=1920, help="width (default: %(default)s)")
     parser.add_argument("--height", type=int, default=1080, help="height (default: %(default)s)")
-    parser.add_argument("--entropy_coding", action="store_true", help="Store ANS-compressed quantized Cholesky and feature indices")
+    parser.add_argument("--skip_entropy_estimation", action="store_true", help="Skip ANS-based bitrate estimation")
     parser.add_argument("--key_frames", type=Path, help="K_frames.txt from the overfitting stage")
     parser.add_argument("--I_interval", type=int, default=5, help="I_frame_interval (default: %(default)s)")
     args = parser.parse_args(argv)
@@ -360,26 +357,32 @@ def main(argv):
         end_time = time.time()
         total_time = end_time - start_time
         print(f"Training finished in {total_time:.2f} seconds.")
-        for idx in range(0,layer_number):
-            logwriter.write("{}: Layer{}_Image: {}x{}, PSNR:{:.4f}, MS-SSIM:{:.4f}, Bpp:{:.4f}, Encoding:{:.2f}".format(
-                frame_num, idx+1, trainer.W, trainer.H, psnr[idx], ms_ssim[idx], bpp[idx], total_time))
+        for idx in range(layer_number):
+            log_line = (
+                f"{frame_num}: Layer{idx + 1}_Image: {trainer.W}x{trainer.H}, "
+                f"PSNR:{psnr[idx]:.4f}, MS-SSIM:{ms_ssim[idx]:.4f}"
+            )
+            if bpp is not None:
+                log_line += f", Bpp:{bpp[idx]:.4f}"
+            logwriter.write(f"{log_line}, Encoding:{total_time:.2f}")
         frames.append(frame_num)
         psnr_list.append(psnr[-1])
         msssim_list.append(ms_ssim[-1])
-        bpp_list.append(bpp[-1])
+        if bpp is not None:
+            bpp_list.append(bpp[-1])
         if args.save_video:
             rendered_images_list.append(rendered_images)
         encoded_gmodels_state_dict[f"frame_{frame_num}"] = encoded_Gmodel
     avg_psnr = sum(psnr_list) / len(psnr_list)
     avg_msssim = sum(msssim_list) / len(msssim_list)
-    avg_bpp = sum(bpp_list) / len(bpp_list)
     frames.append("Average")
     psnr_list.append(avg_psnr)
     msssim_list.append(avg_msssim)
-    bpp_list.append(avg_bpp)
     torch.save(encoded_gmodels_state_dict, gmodel_save_path / "encoded_gmodels_state_dict.pth")
     print("=== Progressive Training Done ===")
-    print(f"Average BPP: {avg_bpp:.4f},Average PSNR: {avg_psnr:.4f}, Average MS-SSIM: {avg_msssim:.6f}")
+    if bpp_list:
+        print(f"Average BPP: {sum(bpp_list) / len(bpp_list):.4f}")
+    print(f"Average PSNR: {avg_psnr:.4f}, Average MS-SSIM: {avg_msssim:.6f}")
     if args.save_video:
         generate_progressive_video(result_save_path, rendered_images_list,"rendered_video.mp4")
 

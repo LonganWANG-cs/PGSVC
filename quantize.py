@@ -120,6 +120,7 @@ class UniformQuantizer(nn.Module):
             self.qmax = 2 ** bits - 1
         self.learned = learned
         self.entropy_type = entropy_type
+        self.measure_bits = True
         if self.learned:
             self.scale = nn.Parameter(torch.ones(num_channels)/self.qmax, requires_grad=True)
             self.beta = nn.Parameter(torch.ones(num_channels)/self.qmax, requires_grad=True)
@@ -147,7 +148,7 @@ class UniformQuantizer(nn.Module):
             dequant = quant / self.qmax
 
         bits, entropy_loss = 0, 0
-        if not self.training:
+        if not self.training and self.measure_bits:
             num_points, num_channels = x.shape
             bits = self.size(quant)
         return dequant, entropy_loss*self.weight, bits
@@ -174,6 +175,7 @@ class VectorQuantizer(nn.Module):
         super().__init__()
         self.num_quantizers = num_quantizers
         self.vector_type = vector_type
+        self.measure_bits = True
         if self.num_quantizers == 1:
             if self.vector_type == "vector":
                 self.quantizer = VectorQuantize(dim=codebook_dim, codebook_size=codebook_size, decay = 0.8, commitment_weight = 1., kmeans_init = True, 
@@ -192,7 +194,7 @@ class VectorQuantizer(nn.Module):
             num_points, num_channels = x.shape
             x, embed_index, l_vq = self.quantizer(x)
             l_vq = torch.sum(l_vq)
-            bits = self.size(embed_index)
+            bits = self.size(embed_index) if self.measure_bits else 0
             # unit_bit = bits / num_points / num_channels
             return x, l_vq, bits
 
@@ -251,8 +253,7 @@ def compress_matrix_flatten_categorical(matrix, return_table=False):
     if len(unique) == 1:
         # Return minimal compression info for single value
         # Just need to store the value and count, no need for entropy coding
-        unique = unique.astype(judege_type(unique[0], unique[0]))
-        return unique, np.array([matrix.size], dtype=np.int32), unique
+        return np.array([unique[0]], dtype=np.uint8), np.array([len(matrix)], dtype=np.int32), unique.astype(np.uint8)
     
     min_value = np.min(unique)
     max_value = np.max(unique)
@@ -325,7 +326,7 @@ def decompress_matrix_flatten_categorical(compressed, unique_counts, quant_symbo
 
 def judege_type(min, max):
     if min>=0:
-        if max<=255:
+        if max<=256:
             return np.uint8
         elif max<=65535:
             return np.uint16
@@ -339,32 +340,5 @@ def judege_type(min, max):
         else:
             return np.int32
         
-def pack_quantized_indices(indices):
-    compressed, counts, symbols = compress_matrix_flatten_categorical(
-        indices.int().cpu().numpy().reshape(-1)
-    )
-    return {
-        "shape": tuple(indices.shape),
-        "compressed": torch.from_numpy(compressed.astype(np.uint32).view(np.int32)),
-        "counts": torch.from_numpy(counts.astype(np.int32)),
-        "symbols": torch.from_numpy(symbols.astype(np.int16)),
-    }
-
-
-def unpack_quantized_indices(payload):
-    if isinstance(payload, torch.Tensor):
-        return payload
-    shape = payload["shape"]
-    counts = payload["counts"].cpu().numpy()
-    compressed = payload["compressed"].cpu().numpy().view(np.uint32)
-    symbols = payload["symbols"].cpu().numpy()
-    if counts.size == 1:
-        return torch.full(shape, int(symbols[0]), dtype=torch.int32)
-    indices = decompress_matrix_flatten_categorical(
-        compressed, counts, symbols, int(np.prod(shape)), shape
-    )
-    return torch.from_numpy(indices.reshape(shape))
-
-
 def get_np_size(x):
     return x.size * x.itemsize

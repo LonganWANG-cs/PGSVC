@@ -22,7 +22,6 @@ import torchvision.transforms as transforms
 import torch.nn as nn
 
 from PGSVC_decoder import GaussianSplats, GaussianSplats_delta
-from quantize import unpack_quantized_indices
 
 import copy
 
@@ -163,8 +162,8 @@ class SimpleTrainer2d:
                 layer_ckpt = checkpoint[i]
 
                 device = self.device
-                q_ch = unpack_quantized_indices(layer_ckpt['cholesky']).to(device, dtype=torch.float32)
-                feat_idx = unpack_quantized_indices(layer_ckpt['features_index']).to(device, dtype=torch.long)
+                q_ch = layer_ckpt['cholesky'].to(device, dtype=torch.float32)
+                feat_idx = layer_ckpt['features_index'].to(device, dtype=torch.long)
 
                 if add_num > 0:
 
@@ -310,9 +309,9 @@ class SimpleTrainer2d:
 
                 xyz = layer_ckpt['xyz'].to(self.device).float()
 
-                q_ch = unpack_quantized_indices(layer_ckpt['cholesky']).to(self.device, dtype=torch.float32)
+                q_ch = layer_ckpt['cholesky'].to(self.device, dtype=torch.float32)
 
-                feat_idx = unpack_quantized_indices(layer_ckpt['features_index']).to(self.device, dtype=torch.long)
+                feat_idx = layer_ckpt['features_index'].to(self.device, dtype=torch.long)
 
                 ch = self.gaussian_model.cholesky_quantizers[i].decompress(q_ch)
 
@@ -587,9 +586,7 @@ def main(argv):
 
                 if 'cholesky' in ld:
 
-                    cholesky = ld['cholesky']
-                    shape = cholesky['shape'] if isinstance(cholesky, dict) else cholesky.shape
-                    layers.append(int(shape[0]))
+                    layers.append(int(ld['cholesky'].shape[0]))
 
                     continue
 
