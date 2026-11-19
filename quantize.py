@@ -251,7 +251,8 @@ def compress_matrix_flatten_categorical(matrix, return_table=False):
     if len(unique) == 1:
         # Return minimal compression info for single value
         # Just need to store the value and count, no need for entropy coding
-        return np.array([unique[0]], dtype=np.uint8), np.array([len(matrix)], dtype=np.int32), unique.astype(np.uint8)
+        unique = unique.astype(judege_type(unique[0], unique[0]))
+        return unique, np.array([matrix.size], dtype=np.int32), unique
     
     min_value = np.min(unique)
     max_value = np.max(unique)
@@ -324,7 +325,7 @@ def decompress_matrix_flatten_categorical(compressed, unique_counts, quant_symbo
 
 def judege_type(min, max):
     if min>=0:
-        if max<=256:
+        if max<=255:
             return np.uint8
         elif max<=65535:
             return np.uint16
@@ -338,5 +339,32 @@ def judege_type(min, max):
         else:
             return np.int32
         
+def pack_quantized_indices(indices):
+    compressed, counts, symbols = compress_matrix_flatten_categorical(
+        indices.int().cpu().numpy().reshape(-1)
+    )
+    return {
+        "shape": tuple(indices.shape),
+        "compressed": torch.from_numpy(compressed.astype(np.uint32).view(np.int32)),
+        "counts": torch.from_numpy(counts.astype(np.int32)),
+        "symbols": torch.from_numpy(symbols.astype(np.int16)),
+    }
+
+
+def unpack_quantized_indices(payload):
+    if isinstance(payload, torch.Tensor):
+        return payload
+    shape = payload["shape"]
+    counts = payload["counts"].cpu().numpy()
+    compressed = payload["compressed"].cpu().numpy().view(np.uint32)
+    symbols = payload["symbols"].cpu().numpy()
+    if counts.size == 1:
+        return torch.full(shape, int(symbols[0]), dtype=torch.int32)
+    indices = decompress_matrix_flatten_categorical(
+        compressed, counts, symbols, int(np.prod(shape)), shape
+    )
+    return torch.from_numpy(indices.reshape(shape))
+
+
 def get_np_size(x):
     return x.size * x.itemsize

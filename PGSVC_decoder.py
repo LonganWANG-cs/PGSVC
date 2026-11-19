@@ -11,6 +11,28 @@ from pytorch_msssim import ms_ssim
 import time
 
 
+def render_layers(model, gt_images, layer_times):
+    rendered_images = []
+    psnr_list = []
+    ms_ssim_list = []
+    for idx, scale in enumerate(model.scaling_factor):
+        if layer_times is not None:
+            torch.cuda.synchronize(model.device)
+            start = time.perf_counter()
+        out = model.forward_layer(idx)["render"].float()
+        rendered_image = F.interpolate(out.clamp(0, 1), scale_factor=scale, mode="area")
+        if layer_times is not None:
+            torch.cuda.synchronize(model.device)
+            layer_times.append((time.perf_counter() - start) * 1000)
+
+        gt_image = F.interpolate(gt_images[idx], scale_factor=scale, mode="area").float()
+        mse = F.mse_loss(rendered_image, gt_image).item()
+        psnr_list.append(10 * math.log10(1.0 / mse))
+        ms_ssim_list.append(ms_ssim(rendered_image, gt_image, data_range=1, size_average=True).item())
+        rendered_images.append(rendered_image)
+    return rendered_images, psnr_list, ms_ssim_list
+
+
 class GaussianSplats(nn.Module):
     def __init__(self, num_points_per_layer, scaling_factor, **kwargs):
         super().__init__()
@@ -88,26 +110,8 @@ class GaussianSplats(nn.Module):
         out_img = out_img.view(-1, self.H, self.W, 3).permute(0, 3, 1, 2).contiguous()
         return {"render": out_img}
 
-    def render(self,gt_images):
-        rendered_images = []
-        psnr_list = []
-        ms_ssim_list = []
-        for idx in range (0,self.layer_number):
-            out = self.forward_layer(idx)["render"].float()
-            rendered_image = torch.clamp(out, 0, 1)
-            ds_rendered_image = torch.nn.functional.interpolate(rendered_image,
-                                            scale_factor=self.scaling_factor[idx],
-                                            mode='area')
-            ds_gt_images = torch.nn.functional.interpolate(gt_images[idx],
-                                            scale_factor=self.scaling_factor[idx],
-                                            mode='area')
-            mse_loss = F.mse_loss(ds_rendered_image, ds_gt_images.float())
-            psnr = 10 * math.log10(1.0 / mse_loss.item())
-            ms_ssim_value = ms_ssim(ds_rendered_image, ds_gt_images.float(), data_range=1, size_average=True).item()
-            rendered_images.append(ds_rendered_image)
-            psnr_list.append(psnr)
-            ms_ssim_list.append(ms_ssim_value)
-        return rendered_images, psnr_list, ms_ssim_list
+    def render(self, gt_images, layer_times=None):
+        return render_layers(self, gt_images, layer_times)
     
 
     
@@ -258,26 +262,8 @@ class GaussianSplats_delta(nn.Module):
 
 
 
-    def render(self,gt_images):
-        rendered_images = []
-        psnr_list = []
-        ms_ssim_list = []
-        for idx in range (0,self.layer_number):
-            out = self.forward_layer(idx)["render"].float()
-            rendered_image = torch.clamp(out, 0, 1)
-            ds_rendered_image = torch.nn.functional.interpolate(rendered_image,
-                                            scale_factor=self.scaling_factor[idx],
-                                            mode='area')
-            ds_gt_images = torch.nn.functional.interpolate(gt_images[idx],
-                                            scale_factor=self.scaling_factor[idx],
-                                            mode='area')
-            mse_loss = F.mse_loss(ds_rendered_image, ds_gt_images.float())
-            psnr = 10 * math.log10(1.0 / mse_loss.item())
-            ms_ssim_value = ms_ssim(ds_rendered_image, ds_gt_images.float(), data_range=1, size_average=True).item()
-            rendered_images.append(ds_rendered_image)
-            psnr_list.append(psnr)
-            ms_ssim_list.append(ms_ssim_value)
-        return rendered_images, psnr_list, ms_ssim_list
+    def render(self, gt_images, layer_times=None):
+        return render_layers(self, gt_images, layer_times)
     
 
 

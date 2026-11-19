@@ -259,12 +259,14 @@ def image_to_tensor(img: Image.Image):
     img_tensor = transform(img).unsqueeze(0)  # [1, C, H, W]
     return img_tensor
 
-def process_yuv_video(file_path, width, height):
+def process_yuv_video(file_path, width, height, max_frames=None):
     
     frame_size = width * height * 3 // 2
     
     file_size = os.path.getsize(file_path)
     total_frames = file_size // frame_size
+    if max_frames is not None:
+        total_frames = min(total_frames, max_frames)
     
     video_frames = []
     

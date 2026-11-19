@@ -303,6 +303,7 @@ def parse_args(argv):
     parser.add_argument("--loss_type", type=str, default='L2', help="Type of Loss")
     parser.add_argument("--seed", type=float, default=1, help="Set random seed for reproducibility")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate (default: %(default)s)",)
+    parser.add_argument("--single_pass", action="store_true", help="Train each output frame once, with GSP/GSA applied within its iteration budget")
     parser.add_argument("--look_ahead", type=int, default=1)
     parser.add_argument("--removal_rate", type=float, default=0.2, help="Removal rate")
     parser.add_argument("--is_downsample", action="store_true", help="Downsample in the lower layers")
@@ -353,7 +354,7 @@ def main(argv):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         np.random.seed(args.seed)
-    video_frames = process_yuv_video(args.dataset, args.width, args.height)
+    video_frames = process_yuv_video(args.dataset, args.width, args.height, args.video_length)
     frame_length, start=min(args.video_length, len(video_frames)),0
     rendered_images_list = []
     gmodels_state_dict = {}
@@ -365,16 +366,16 @@ def main(argv):
     else:
         if frame_length>1:
             loss_list=[]
-            for i in range(start, start+frame_length):
-                frame_num=i+1
-                if frame_num ==1:
+            for i in range(start, start + frame_length):
+                frame_num = i + 1
+                if frame_num == 1:
                     loss_extractor_K = SimpleTrainer2d(
-                        frame = video_frames[i+1],
-                        frame_num=frame_num + 1,
+                        frame = video_frames[i],
+                        frame_num=frame_num,
                         iterations = 500,
                         num_points_per_layer = [5000],
                         result_save_path=result_save_path,
-                        scaling_factor=scaling_factor,
+                        scaling_factor=[1.0],
                         predicted_model=None,
                         args=args
                     )
@@ -383,22 +384,22 @@ def main(argv):
                     loss_list.append(0)
                 else:
                     loss_extractor_K = SimpleTrainer2d(
-                        frame = video_frames[i+1],
-                        frame_num=frame_num + 1,
+                        frame = video_frames[i],
+                        frame_num=frame_num,
                         iterations = 500,
                         num_points_per_layer = [5000],
                         result_save_path=result_save_path,
-                        scaling_factor=scaling_factor,
+                        scaling_factor=[1.0],
                         predicted_model=None,
                         args=args
                     )
                     loss_extractor_P = SimpleTrainer2d(
-                        frame = video_frames[i+1],
-                        frame_num=frame_num + 1,
+                        frame = video_frames[i],
+                        frame_num=frame_num,
                         iterations = 100,
                         num_points_per_layer = [5000],
                         result_save_path=result_save_path,
-                        scaling_factor=scaling_factor,
+                        scaling_factor=[1.0],
                         predicted_model=Gmodel,
                         args=args
                     )
@@ -411,7 +412,9 @@ def main(argv):
             values_to_normalize = loss_list[1:]
             min_value = np.min(values_to_normalize)
             max_value = np.max(values_to_normalize)
-            normalized_loss_list = [loss_list[0]] + [(v - min_value) / (max_value - min_value) for v in values_to_normalize]
+            loss_range = max_value - min_value
+            normalized = (values_to_normalize - min_value) / loss_range if loss_range > 0 else np.zeros_like(values_to_normalize)
+            normalized_loss_list = [0.0, *normalized]
             outlier_indices = detect_outliers_mean_diff(normalized_loss_list, window_size=10, threshold=3)
             K_frames = [int(x + 1) for x in outlier_indices]
             K_frames = np.insert(K_frames, 0, 1)
@@ -431,7 +434,22 @@ def main(argv):
     Gmodel=None
     for i in range(start, start + frame_length):
         frame_num=i+1
-        if args.is_GSP and args.is_GSA:
+        if args.single_pass:
+            previous = None if frame_num in K_frames else Gmodel
+            trainer = SimpleTrainer2d(
+                frame=video_frames[i],
+                frame_num=frame_num,
+                iterations=args.iterations,
+                num_points_per_layer=layers if previous is None else P_layers,
+                result_save_path=result_save_path,
+                scaling_factor=scaling_factor,
+                predicted_model=previous,
+                is_GSP=args.is_GSP,
+                is_GSA=args.is_GSA,
+                is_GR=args.is_GR,
+                args=args,
+            )
+        elif args.is_GSP and args.is_GSA:
             if frame_num in K_frames:
                 #K-frame inhancement
                 #######Look ahead frame limit############
@@ -685,7 +703,8 @@ def main(argv):
         frames.append(frame_num)
         psnr_list.append(psnr[-1])
         msssim_list.append(ms_ssim[-1])
-        rendered_images_list.append(rendered_images)
+        if args.save_video:
+            rendered_images_list.append(rendered_images)
         gmodels_state_dict[f"frame_{frame_num}"] = Gmodel
     avg_psnr = sum(psnr_list) / len(psnr_list)
     avg_msssim = sum(msssim_list) / len(msssim_list)

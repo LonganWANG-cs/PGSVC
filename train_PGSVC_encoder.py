@@ -11,6 +11,7 @@ import torchvision.transforms as transforms
 import torch.nn as nn
 from PGSVC_encoder import GaussianSplats, GaussianSplats_delta
 import copy
+from quantize import pack_quantized_indices
 class SimpleTrainer2d:
     """Trains random 2d gaussians to fit an image."""
     def __init__(
@@ -41,6 +42,8 @@ class SimpleTrainer2d:
         self.previous_model=previous_model
         self.overfitted_model=overfitted_model
         self.current_point_ids_layers = None
+        self.point_id_order = []
+        self.entropy_coding = args.entropy_coding
         for s in self.scaling_factor:
             # downsampled = torch.nn.functional.interpolate(self.gt_image, scale_factor=s, mode='area')
             # resized_back = torch.nn.functional.interpolate(downsampled, size=(self.H, self.W), mode='bilinear', align_corners=False)
@@ -70,44 +73,32 @@ class SimpleTrainer2d:
             self.current_point_ids_layers = current_point_ids_layers
             previous_point_ids_layers = previous_model['_point_ids_layers']
             for i, _ in enumerate(self.num_points_per_layer):
-                cur_len = overfitted_model['_xyz_layers'][i].shape[0]
-                cur_ids = current_point_ids_layers[i].detach().cpu().numpy()
-                prev_ids = previous_point_ids_layers[i].detach().cpu().numpy()
-                prev_index = {int(k): idx for idx, k in enumerate(prev_ids.tolist())}
-                def _count_unmatched(prev_index_map, cur_ids_list):
-                    unmatched = 0
-                    for pid in cur_ids_list:
-                        if prev_index_map.get(int(pid), -1) == -1:
-                            unmatched += 1
-                    return unmatched
+                prev_ids = previous_point_ids_layers[i].tolist()
+                prev_index = {point_id: idx for idx, point_id in enumerate(prev_ids)}
+                matched = []
+                unmatched = []
+                previous_rows = []
+                for row, point_id in enumerate(current_point_ids_layers[i].tolist()):
+                    if point_id in prev_index:
+                        matched.append(row)
+                        previous_rows.append(prev_index[point_id])
+                    else:
+                        unmatched.append(row)
+                order = torch.tensor(matched + unmatched, device=self.device, dtype=torch.long)
+                previous_rows = torch.tensor(previous_rows, dtype=torch.long)
+
                 def align_param(name):
-                    cur = overfitted_model[name][i].to(self.device)
-                    dtype = cur.dtype
-                    shape_tail = cur.shape[1:]
-                    aligned_prev = torch.zeros((cur_len,)+shape_tail, dtype=dtype, device=self.device)
-                    for ci, pid in enumerate(cur_ids):
-                        pi = prev_index.get(int(pid), -1)
-                        if pi != -1:
-                            aligned_prev[ci] = previous_model[name][i][pi].to(self.device)
-                    # Reorder: matched pairs first, unmatched to the end (consistent order for both tensors)
-                    matched_idx = []
-                    unmatched_idx = []
-                    for ci, pid in enumerate(cur_ids):
-                        if prev_index.get(int(pid), -1) != -1:
-                            matched_idx.append(ci)
-                        else:
-                            unmatched_idx.append(ci)
-                    if len(matched_idx) == 0 or len(unmatched_idx) == 0:
-                        return cur, aligned_prev
-                    order = torch.as_tensor(matched_idx + unmatched_idx, device=self.device, dtype=torch.long)
-                    cur = cur.index_select(0, order)
-                    aligned_prev = aligned_prev.index_select(0, order)
-                    return cur, aligned_prev
+                    current = overfitted_model[name][i].to(self.device).index_select(0, order)
+                    previous = torch.zeros_like(current)
+                    previous[:len(matched)] = previous_model[name][i].index_select(0, previous_rows).to(self.device)
+                    return current, previous
+
                 cur_xyz, prev_xyz = align_param('_xyz_layers')
                 cur_ch, prev_ch = align_param('_cholesky_layers')
                 cur_feat, prev_feat = align_param('_features_dc_layers')
-                self.gaussian_model.add_num_Gaussians[i] = _count_unmatched(prev_index, cur_ids)
-                
+                self.gaussian_model.add_num_Gaussians[i] = len(unmatched)
+                self.point_id_order.append(order)
+
                 self.gaussian_model._xyz_layers[i] = nn.Parameter((cur_xyz-prev_xyz).to(self.device))
                 self.gaussian_model._cholesky_layers[i] = nn.Parameter((cur_ch-prev_ch).to(self.device))
                 self.gaussian_model._features_dc_layers[i] = nn.Parameter((cur_feat-prev_feat).to(self.device))
@@ -220,6 +211,10 @@ class SimpleTrainer2d:
 
             # quantized representation (encoded Gaussians + quantizer params)
             encoded_layers, quantizers_state = self.gaussian_model.get_quantized_Model()
+            if self.entropy_coding:
+                for layer in encoded_layers:
+                    for field in ("cholesky", "features_index"):
+                        layer[field] = pack_quantized_indices(layer[field])
             encoded_Gmodel = {
                 'encoded_layers': encoded_layers,
                 'quantizers_state': quantizers_state,
@@ -227,7 +222,11 @@ class SimpleTrainer2d:
 
             # also save current point ids (for delta / predictive frames)
             if hasattr(self, 'current_point_ids_layers') and self.current_point_ids_layers is not None:
-                encoded_Gmodel['_point_ids_layers'] = [p.detach().cpu() for p in self.current_point_ids_layers]
+                ids = [p.detach().cpu() for p in self.current_point_ids_layers]
+                encoded_Gmodel['_point_ids_layers'] = ids
+                decoded_Gmodel['_point_ids_layers'] = [
+                    p.index_select(0, order.cpu()) for p, order in zip(ids, self.point_id_order)
+                ] if self.point_id_order else ids
 
             # if previous_model is not None and overfitted_model is not None:
 
@@ -256,6 +255,8 @@ def parse_args(argv):
     parser.add_argument("--video_length", type=int, default=24, help="number of images to train in the dataset (default: %(default)s)") 
     parser.add_argument("--width", type=int, default=1920, help="width (default: %(default)s)")
     parser.add_argument("--height", type=int, default=1080, help="height (default: %(default)s)")
+    parser.add_argument("--entropy_coding", action="store_true", help="Store ANS-compressed quantized Cholesky and feature indices")
+    parser.add_argument("--key_frames", type=Path, help="K_frames.txt from the overfitting stage")
     parser.add_argument("--I_interval", type=int, default=5, help="I_frame_interval (default: %(default)s)")
     args = parser.parse_args(argv)
     args = parser.parse_args(argv)
@@ -282,10 +283,10 @@ def main(argv):
     result_save_path.mkdir(parents=True, exist_ok=True)
     logwriter = LogWriter(result_save_path)
     
-    video_frames = process_yuv_video(args.dataset, args.width, args.height)
+    video_frames = process_yuv_video(args.dataset, args.width, args.height, args.video_length)
     frame_length, start=min(args.video_length, len(video_frames)),0
     
-    output_path_K_frames = Path(f"./checkpoints/{args.savdir}/{args.data_name}/K_frames.txt")
+    output_path_K_frames = args.key_frames or Path(f"./checkpoints/{args.savdir}/{args.data_name}/K_frames.txt")
     if output_path_K_frames.exists():
         with open(output_path_K_frames, "r") as f:
             K_frames = [int(line.strip()) for line in f.readlines()]
@@ -300,7 +301,7 @@ def main(argv):
     encoded_gmodels_state_dict = {}
     Gmodel=None
     K_Gmodel=None
-    checkpoints = torch.load(args.model_path,map_location=torch.device("cuda:0"))
+    checkpoints = torch.load(args.model_path, map_location="cpu")
     for i in range(start, start + frame_length):
         frame_num=i+1
         modelid=f"frame_{frame_num}"
@@ -326,14 +327,7 @@ def main(argv):
                         args=args
                     )
         else:
-            # previous_modelid = f"frame_{k_frame_num}"
             previous_modelid = f"frame_{i}"
-            # if (K_Gmodel is not None) and ('_point_ids_layers' in checkpoints[previous_modelid]):
-            #     K_Gmodel = dict(K_Gmodel)
-            #     K_Gmodel['_point_ids_layers'] = checkpoints[previous_modelid]['_point_ids_layers']
-            if (Gmodel is not None) and ('_point_ids_layers' in checkpoints[previous_modelid]):
-                Gmodel = dict(Gmodel)
-                Gmodel['_point_ids_layers'] = checkpoints[previous_modelid]['_point_ids_layers']
             print(f"modelid:{modelid}; p_modelid:{previous_modelid}")
             # trainer = SimpleTrainer2d(
             #             frame = video_frames[frame_num-1],
@@ -373,7 +367,8 @@ def main(argv):
         psnr_list.append(psnr[-1])
         msssim_list.append(ms_ssim[-1])
         bpp_list.append(bpp[-1])
-        rendered_images_list.append(rendered_images)
+        if args.save_video:
+            rendered_images_list.append(rendered_images)
         encoded_gmodels_state_dict[f"frame_{frame_num}"] = encoded_Gmodel
     avg_psnr = sum(psnr_list) / len(psnr_list)
     avg_msssim = sum(msssim_list) / len(msssim_list)
