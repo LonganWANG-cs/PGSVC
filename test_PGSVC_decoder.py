@@ -21,7 +21,7 @@ import torchvision.transforms as transforms
 
 import torch.nn as nn
 
-from PGSVC_decoder import GaussianSplats, GaussianSplats_delta
+from PGSVC_decoder import GaussianSplats, GaussianSplats_delta, render_layer_image
 
 import copy
 
@@ -495,6 +495,7 @@ def parse_args(argv):
     parser.add_argument("--height", type=int, default=1080, help="height (default: %(default)s)")
 
     parser.add_argument("--I_interval", type=int, default=5, help="I_frame_interval (default: %(default)s)")
+    parser.add_argument("--warmup_render", action="store_true", help="Preload gsplat and warm up both render paths before timing the first frame")
 
     args = parser.parse_args(argv)
 
@@ -549,6 +550,16 @@ def main(argv):
     
 
     quantized_gmodels_state_dict = torch.load(args.model_path, map_location="cpu")
+
+    if args.warmup_render:
+        torch.cuda.synchronize()
+        preload_start = time.perf_counter()
+        from gsplat.cuda import _backend
+
+        if _backend._C is None:
+            raise RuntimeError("Could not load the gsplat CUDA extension")
+        torch.cuda.synchronize()
+        print(f"gsplat preload: {(time.perf_counter() - preload_start) * 1000:.2f} ms")
 
     def _get_num_points_per_layer(frame_dict: dict):
 
@@ -787,6 +798,14 @@ def main(argv):
 
         torch.cuda.synchronize()
         model_ms = (time.perf_counter() - decode_start) * 1000
+        if args.warmup_render and i == start:
+            warmup_start = time.perf_counter()
+            with torch.no_grad():
+                for idx, scale in enumerate(scaling_factor):
+                    render_layer_image(render.gaussian_model, idx, scale)
+            torch.cuda.synchronize()
+            print(f"First-frame render warmup: {(time.perf_counter() - warmup_start) * 1000:.2f} ms")
+
         layer_times = []
         psnr, ms_ssim, rendered_images, decoded_Gmodel = render.render(layer_times)
         decode_ms = model_ms + render.state_ms

@@ -11,6 +11,11 @@ from pytorch_msssim import ms_ssim
 import time
 
 
+def render_layer_image(model, idx, scale):
+    image = model.forward_layer(idx)["render"].float().clamp(0, 1)
+    return F.interpolate(image, scale_factor=scale, mode="area")
+
+
 def render_layers(model, gt_images, layer_times):
     rendered_images = []
     psnr_list = []
@@ -19,8 +24,7 @@ def render_layers(model, gt_images, layer_times):
         if layer_times is not None:
             torch.cuda.synchronize(model.device)
             start = time.perf_counter()
-        out = model.forward_layer(idx)["render"].float()
-        rendered_image = F.interpolate(out.clamp(0, 1), scale_factor=scale, mode="area")
+        rendered_image = render_layer_image(model, idx, scale)
         if layer_times is not None:
             torch.cuda.synchronize(model.device)
             layer_times.append((time.perf_counter() - start) * 1000)
